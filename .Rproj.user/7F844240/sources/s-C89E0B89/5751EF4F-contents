@@ -1,0 +1,23 @@
+if (is.data.frame(expr_origin_data) != TRUE ){
+  
+  print('a')
+  
+}
+a = 1
+a <- my_normalized(expr_origin_data)
+
+data <- expr_origin_data
+
+max = my_max(data)
+min = my_min(data)
+data_new <- data
+for (i in 1:ncol(data)){
+  for (j in 1:nrow(data)){
+    data_new[j, i] <- (data[j, i] - min)/(max - min)
+  }
+}
+data_new
+
+a <- my_normalized(expr_origin_data)
+
+

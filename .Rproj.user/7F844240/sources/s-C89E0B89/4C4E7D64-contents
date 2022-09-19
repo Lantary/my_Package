@@ -1,0 +1,139 @@
+library(rstudioapi)
+library(dplyr)
+library(tibble)
+library(survival)
+
+# 设置工作目录
+setwd(dirname(getSourceEditorContext()$path))
+getwd()
+
+# ====数据处理====
+
+# 读取数据
+sigle_cox_result <- read.table(
+  file = '../结果/文本结果/1. 生存分析_单因素cox分析结果.txt',
+  sep = '\t'
+)
+
+GSE37745_CF <- read.table(
+  '../原始数据/0906 处理后的原始数据/GSE37745_ClinicalFeatures-Training.txt',
+  sep = '\t',
+  header = T
+)
+
+GSE37745_expr <- read.table(
+  '../原始数据/0906 处理后的原始数据/GSE37745_uniquelncRNAexpr(郭毛妮).txt',
+  sep = '\t',
+  header = T
+)
+
+# 数据处理
+
+## 这里是全12个基因的cox_gene
+cox_gene <- sigle_cox_result %>% 
+  rownames() %>% 
+  as.data.frame() %>% 
+  rename(lncRNA = '.')
+
+## 这里是文章中8个基因的cox_gene
+cox_gene <- sigle_cox_result %>% 
+  rownames() %>% 
+  as.data.frame() %>% 
+  rename(lncRNA = '.') %>% 
+  dplyr::filter(
+    lncRNA %in% c(
+      'ENSG00000261578.1', 
+      'ENSG00000261731.2',
+      'ENSG00000264198.2',
+      'ENSG00000233642.1',
+      'ENSG00000244558.3',
+      'ENSG00000225420.1',
+      'ENSG00000251230.3',
+      'ENSG00000240207.4'
+    )
+  )
+
+ToplncRNA <- GSE37745_expr %>% 
+  merge(., cox_gene) %>% 
+  tibble::column_to_rownames('lncRNA') %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column('Sample') %>% 
+  merge(GSE37745_CF, .)
+
+ToplncRNA$Dead <- ToplncRNA$Dead %>% 
+  stringr::str_replace('no', 'FALSE') %>% 
+  stringr::str_replace('yes', 'TRUE') %>% 
+  as.logical()  
+
+
+
+# ====多因素生存分析====
+
+# 数据格式见：'2.多因素cox分析_DM.rdata'
+# 该格式为单因素结果为 8 的结果。 
+
+# 构造surv函数
+surv_data <- with(ToplncRNA, Surv(days_to_determined_death_status, Dead))
+
+
+# 多因素分析
+
+mul_cox_result <- matrix(NA, 1, 2) 
+colnames(mul_cox_result) <- c('gene', 'coef')
+
+for (i in 9 : ncol(ToplncRNA)){
+  
+  result <- coxph(
+    surv_data ~ ToplncRNA[, i] +
+      Age +
+      Gender +
+      Hiology + 
+      Tumor_stage,
+    data = ToplncRNA
+  ) %>% 
+    summary()
+  
+  mul_cox_result <- rbind(
+    mul_cox_result,
+    cbind(
+      colnames(ToplncRNA)[i],
+      result[['coefficients']][1]
+    )
+  )
+  
+  # # 添加报告信息
+  # print(str_c(i, '/', length(ToplncRNA[1, ])))
+  
+}
+
+# 分析结果处理
+mul_cox_result <- mul_cox_result[-1, ]
+rownames(mul_cox_result) <- mul_cox_result[, 1]
+# mul_cox_result <- mul_cox_result[, -1]
+mul_cox_result <- as.data.frame(mul_cox_result)
+# colnames(mul_cox_result)[1] <- 'coef'
+
+
+# ====保存分析结果====
+
+picDir = '../结果/文本结果'
+
+
+## 以Rdata 格式保存分析结果
+save_name_rdata = '2.多因素cox分析_结果.rdata'
+save(
+  mul_cox_result,
+  file = paste(picDir, save_name_rdata, sep = "/")
+)
+
+## 以 txt 格式保存分析结果
+save_name_txt <- '2. 多因素cox分析_系数结果.txt'
+write.table(
+  mul_cox_result,
+  file = paste(picDir, save_name_txt, sep = '/'),
+  sep = '\t',
+)
+
+
+

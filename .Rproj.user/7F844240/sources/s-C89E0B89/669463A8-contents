@@ -1,0 +1,7 @@
+library(roxygen2)
+library(rstudioapi)
+# 设置工作目录
+setwd(dirname(getSourceEditorContext()$path))
+getwd()
+
+roxygenize('myPackage')

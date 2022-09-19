@@ -1,0 +1,161 @@
+library(rstudioapi)
+library(dplyr)
+library(stringr)
+library(GEOquery)
+library(tibble)
+library(limma)
+
+
+# 设置工作目录
+setwd(dirname(getSourceEditorContext()$path))
+getwd()
+
+
+# 读取数据
+
+## 读取表达矩阵
+origin_data_1 <- getGEO(
+  filename = '../原始数据/GSE20129_GPL10558.txt',
+  getGPL = F
+) 
+
+origin_data_2 <- getGEO(
+  filename = '../原始数据/GSE20129_GPL6104.txt',
+  getGPL = F
+)
+
+## 读取平台信息
+GPL_1 <- getGEO(
+  filename = '../原始数据/GPL10558.annot',
+  AnnotGPL = T
+) %>% 
+  Table() %>% 
+  dplyr::rename(
+    'probe_id' = 'ID',
+    'gene_name' = 'Gene symbol'
+  )
+
+GPL_2 <- getGEO(
+  filename = '../原始数据/GPL6104.annot',
+  AnnotGPL = T
+) %>% 
+  Table() %>% 
+  dplyr::rename(
+    'probe_id' = 'ID',
+    'gene_name' = 'Gene symbol'
+  )
+
+load('../../../结果/rdata/1.注释信息处理.rdata')
+
+
+# 构造 mRNA 注释信息
+mRNA_annot_1 <- merge(GPL_1, annotation)
+mRNA_annot_2 <- merge(GPL_2, annotation)
+#mRNA_annot <- mRNA_annot[!duplicated(mRNA_annot$gene_name), ]
+
+
+
+# ====数据处理====
+
+# 提取样本信息以及表达矩阵信息
+
+## 处理样本信息
+pd_origin_data_1 <- pData(origin_data_1) %>% 
+  dplyr::select(
+    sample = geo_accession,
+    d_group = characteristics_ch1,
+    p_group = characteristics_ch1.1
+  ) 
+
+pd_origin_data_2 <- pData(origin_data_2) %>% 
+  dplyr::select(
+    sample = geo_accession,
+    d_group = characteristics_ch1,
+    p_group = characteristics_ch1.1
+  ) 
+
+pd_origin_data_2$d_group <- pd_origin_data_2$d_group %>% 
+  stringr::str_replace('disease state: ', '') %>% 
+  stringr::str_replace('no atherosclerosis', 'no_atherosclerosis')
+
+
+## 处理后的表达矩阵，mRNA表达矩阵
+expr_origin_data_1 <- exprs(origin_data_1) %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column('probe_id') %>% 
+  merge(mRNA_annot_1[, c(1, 2)], .) %>% 
+  dplyr::select(-'probe_id') %>%     # 删除第一列 probe_id
+  aggregate(.~ gene_name, data = ., median) %>%  # 以gene_name作为因子水平，相同的取中位数  
+  tibble::column_to_rownames(var = 'gene_name')
+
+expr_origin_data_2 <- exprs(origin_data_2) %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column('probe_id') %>% 
+  merge(mRNA_annot_2[, c(1, 2)], .) %>% 
+  dplyr::select(-'probe_id') %>%     # 删除第一列 probe_id
+  aggregate(.~ gene_name, data = ., median) %>%  # 以gene_name作为因子水平，相同的取中位数  
+  tibble::column_to_rownames(var = 'gene_name')
+
+
+# ====limma差异分析====
+
+# 直接从此开始
+library(rstudioapi)
+library(dplyr)
+library(stringr)
+library(GEOquery)
+library(tibble)
+library(limma)
+
+load('../数据模板/gse20129_差异分析_DM.rdata')
+
+# 构造设计矩阵
+design <- model.matrix(~0 + factor(pd_origin_data_2$d_group))
+colnames(design) <- levels(factor(pd_origin_data_2$d_group))
+rownames(design) <- rownames(pd_origin_data_2) 
+
+# 模型拟合及分析
+contrast_matrix <- makeContrasts('no_atherosclerosis-atherosclerosis', levels = design)
+expDiff_result <- limma::lmFit(expr_origin_data_2, design) %>% 
+  contrasts.fit(contrast_matrix) %>% 
+  eBayes() %>% 
+  topTable(coef = 1, n = Inf) %>% 
+  na.omit()
+
+expDiff_result_top <- expDiff_result %>% 
+  dplyr::filter(
+    P.Value < 0.005
+  )
+
+
+expDiff_result_target <- expDiff_result %>% 
+  dplyr::filter(
+    rownames(.) %in% c(
+      'CASR',
+      'VCAM1',
+      'AIM2',
+      'CASP1',
+      'IL1B',
+      'IL18'
+    )
+  ) 
+
+# 保存结果
+
+## 保存为Rdata格式
+picDir <- ''
+save_name_rdata <- ''
+
+save(
+  expDiff_result,
+  file = '../差异分析结果/gse20129_GPL6104_差异基因.rdata'
+)
+
+
+## 保存为txt格式
+write.table(
+  expDiff_result,
+  file = '../差异分析结果/gse20129_GPL6104_差异基因.txt',
+  sep = '\t',
+)
+
