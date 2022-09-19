@@ -5,3 +5,6 @@ setwd(dirname(getSourceEditorContext()$path))
 getwd()
 
 roxygenize('myPackage')
+
+devtools::install_github('git@github.com:Lantary/my_Package.git')
+library(myPackage)
